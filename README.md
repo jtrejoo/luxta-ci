@@ -1,2 +1,1 @@
-# luxta-ci
-A8
+"test hello CI/CD"
