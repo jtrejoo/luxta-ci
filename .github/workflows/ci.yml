@@ -10,7 +10,7 @@ permissions:
   pages: write
   id-token: write
 
-  concurrency: ${{ github.workflow}}-${{github.ref}}
+  concurrency: ${{ github.workflow }}-${{ github.ref }}
 
 jobs:
   build-and-test:
@@ -19,7 +19,7 @@ jobs:
   - name: Checkout
   uses: actions/checkout@v4
 
-  - name: Setup Node
+ - name: Setup Node
   uses: actions/set-up-node@v4
   with:
     node-version: "20"
