@@ -1,4 +1,4 @@
-name: CI/CD (Expo Web)
+name: CI/CD (Expo Web + EC2)
 
 on:
   push:
@@ -12,12 +12,16 @@ permissions:
 
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
+env:
+  PROJECT_DIR: .
+  BUILD_DIR: dist
+
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: luxta-main
+        working-directory: ${{ env.PROJECT_DIR }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,7 +34,7 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Run tests (Jest)
+      - name: Run tests
         run: npm test -- --ci --passWithNoTests
         env:
           CI: "true"
@@ -39,30 +43,68 @@ jobs:
         uses: actions/configure-pages@v5
 
       - name: Build (Expo web export)
-        run: npx expo export --platform web --output-dir dist
+        run: npx expo export --platform web --output-dir $BUILD_DIR
         env:
           EXPO_NO_PROMPT: "1"
           EXPO_NO_TELEMETRY: "1"
           CI: "true"
 
       - name: Verify build output
-        run: test -f dist/index.html
+        run: test -f $BUILD_DIR/index.html
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: luxta-main/dist
+          path: ${{ env.PROJECT_DIR }}/${{ env.BUILD_DIR }}
 
-  deploy:
+      - name: Upload build artifact for EC2
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: ${{ env.PROJECT_DIR }}/$BUILD_DIR
+
+  deploy-pages:
     if: github.ref == 'refs/heads/main'
     needs: build-and-test
     runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  deploy-ec2:
+    if: github.ref == 'refs/heads/main'
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web-dist
+
+      - name: Copy build to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_KEY }}
+          port: ${{ secrets.EC2_PORT || 22 }}
+          source: "web-dist/*"
+          target: "/home/${{ secrets.EC2_USER }}/site-dist"
+
+      - name: Publish to Nginx root
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_KEY }}
+          port: ${{ secrets.EC2_PORT || 22 }}
+          script: |
+            sudo mkdir -p ${EC2_PATH:-/var/www/luxta}
+            sudo rm -rf ${EC2_PATH:-/var/www/luxta}/*
+            sudo cp -r /home/${{ secrets.EC2_USER }}/site-dist/* ${EC2_PATH:-/var/www/luxta}/
+            sudo chown -R www-data:www-data ${EC2_PATH:-/var/www/luxta}
+            sudo systemctl reload nginx
