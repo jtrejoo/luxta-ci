@@ -2,65 +2,72 @@ name: CI/CD (Expo Web)
 
 on:
   push:
-  branches: ["main"]
+    branches: [ "main" ]
   pull_request:
-  
+
 permissions:
   contents: read
   pages: write
   id-token: write
 
-  concurrency: ${{ github.workflow }}-${{ github.ref }}
+concurrency: ${{ github.workflow }}-${{ github.ref }}
 
 jobs:
   build-and-test:
-  runs-on: ubuntu-latest
-  steps: 
-  - name: Checkout
-  uses: actions/checkout@v4
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
- - name: Setup Node
-  uses: actions/set-up-node@v4
-  with:
-    node-version: "20"
-    cache: "npm"
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
 
-    - name: Install dependencies
-    run: npm ci 
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
 
-    - name: Run tests
-    run: npm test -- --ci
-    env: 
-      CI: "true"
+      - name: Run tests (Jest)
+        run: |
+          npm test -- --ci --passWithNoTests
+        env:
+          CI: "true"
 
-    - name: Build (Expo web export)
-    run: npx expo export --platform web -- output-dir dist
-    env: 
-      EXPO_NO_PROMPT: "1"
-      EXPO_NO_TELEMETRY: "1"
-      CI: "true"
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
 
-      -name: Upload Pages artifact
-      uses: actions/upload-pages-artifact@v3
-      with:
-        path: dist
+      - name: Build (Expo web export)
+        run: npx expo export --platform web --output-dir dist
+        env:
+          EXPO_NO_PROMPT: "1"
+          EXPO_NO_TELEMETRY: "1"
+          CI: "true"
 
-deploy: 
-  if: github.ref == 'refs/heads/main'
-  needs: build-and-test
-  runs-on: ubuntu-latest
-  permissions:
-    pages: write
-    id-token:write
-  enviroment:
-    name: github-pages
-    url: ${{ steps.deployment.outputs.page_url }}
-  steps: 
-  - id: deployment
-  uses: actions/deploy-pages@v4
+      - name: Verify build output
+        run: |
+          test -f dist/index.html || (echo " No dist/index.html generated" && exit 1)
 
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
 
-  
-
-      
-  
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
